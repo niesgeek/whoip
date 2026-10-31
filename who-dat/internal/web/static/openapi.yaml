@@ -1,0 +1,189 @@
+openapi: 3.1.0
+info:
+  title: wi.fs.kg
+  description: >
+    Normalized WHOIS and RDAP lookup served at https://wi.fs.kg.
+    Returns one consistent shape for every TLD.
+    RDAP is used where available, with a port-43 WHOIS fallback. Append `?raw=true`
+    to any lookup to get the original upstream payload.
+  version: 2.0.0
+  license:
+    name: MIT
+    url: https://github.com/niesgeek/who-dat/blob/HEAD/LICENSE
+servers:
+  - url: https://wi.fs.kg
+    description: Production
+  - url: /
+    description: This deployment
+paths:
+  /v1/whois/{domain}:
+    get:
+      summary: Look up a domain
+      description: Canonical, versioned lookup endpoint.
+      operationId: lookup
+      parameters:
+        - $ref: "#/components/parameters/Domain"
+        - $ref: "#/components/parameters/Raw"
+      responses:
+        "200":
+          description: Lookup succeeded (whether or not the domain is registered).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Result" }
+        "400": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "504": { $ref: "#/components/responses/Error" }
+  /{domain}:
+    get:
+      summary: Look up a domain (bare convenience route)
+      operationId: lookupBare
+      parameters:
+        - $ref: "#/components/parameters/Domain"
+        - $ref: "#/components/parameters/Raw"
+      responses:
+        "200":
+          description: Lookup succeeded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Result" }
+        "405": { $ref: "#/components/responses/Error" }
+  /multi:
+    get:
+      summary: Look up multiple domains
+      operationId: lookupMulti
+      parameters:
+        - name: domains
+          in: query
+          required: true
+          description: Comma-separated list of domains.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Per-domain results.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: "#/components/schemas/Result" }
+  /health:
+    get:
+      summary: Health check
+      operationId: health
+      responses:
+        "200":
+          description: Service is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+components:
+  parameters:
+    Domain:
+      name: domain
+      in: path
+      required: true
+      description: A domain name, hostname, or URL. The registrable domain is extracted.
+      schema: { type: string, example: example.com }
+    Raw:
+      name: raw
+      in: query
+      required: false
+      description: When true, returns the original RDAP JSON or WHOIS text.
+      schema: { type: boolean }
+  responses:
+    Error:
+      description: Error envelope.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: INVALID_DOMAIN }
+            message: { type: string }
+            query: { type: string }
+            source: { type: string, enum: [rdap, whois], description: Lookup backend that failed, when known. }
+            server: { type: string, description: Upstream server queried, when known. }
+            detail: { type: string, description: Underlying error detail, for diagnostics. }
+    Result:
+      type: object
+      properties:
+        query: { type: string }
+        domain: { type: string }
+        domainUnicode: { type: [string, "null"] }
+        id: { type: [string, "null"] }
+        tld: { type: string }
+        isRegistered: { type: boolean }
+        registrar:
+          type: object
+          properties:
+            name: { type: [string, "null"] }
+            ianaId: { type: [string, "null"] }
+            url: { type: [string, "null"] }
+            whoisServer: { type: [string, "null"] }
+            abuseEmail: { type: [string, "null"] }
+            abusePhone: { type: [string, "null"] }
+            reseller: { type: [string, "null"] }
+        status:
+          type: array
+          items: { type: string }
+        nameservers:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              ipv4: { type: array, items: { type: string } }
+              ipv6: { type: array, items: { type: string } }
+        dnssec:
+          type: object
+          properties:
+            signed: { type: boolean }
+            dsData: { type: array, items: { type: object } }
+        dates:
+          type: object
+          properties:
+            created: { type: [string, "null"], format: date-time }
+            updated: { type: [string, "null"], format: date-time }
+            expires: { type: [string, "null"], format: date-time }
+        contacts:
+          type: object
+          properties:
+            registrant: { $ref: "#/components/schemas/Contact" }
+            admin: { $ref: "#/components/schemas/Contact" }
+            tech: { $ref: "#/components/schemas/Contact" }
+            billing: { $ref: "#/components/schemas/Contact" }
+        meta:
+          type: object
+          properties:
+            source: { type: string, enum: [rdap, whois] }
+            server: { type: [string, "null"] }
+            fetchedAt: { type: string, format: date-time }
+            cached: { type: boolean }
+    Contact:
+      type: object
+      properties:
+        name: { type: [string, "null"] }
+        organization: { type: [string, "null"] }
+        email: { type: [string, "null"] }
+        phone: { type: [string, "null"] }
+        address:
+          type: object
+          properties:
+            street: { type: [string, "null"] }
+            city: { type: [string, "null"] }
+            state: { type: [string, "null"] }
+            postalCode: { type: [string, "null"] }
+            country: { type: [string, "null"] }
+        redacted: { type: boolean }

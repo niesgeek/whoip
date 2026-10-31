@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WHOIS / RDAP 查询 | WhoIP</title>
+<meta name="description" content="WhoIP 的 WHOIS 页。输入域名，经本站 /api/whois 查询 who-dat：优先 RDAP，失败再退回 WHOIS。和 IP 查询共用同一个联系页。">
+<meta name="robots" content="index,follow">
+<meta name="theme-color" content="#F5EFE1">
+<meta name="referrer" content="no-referrer">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<svg width="0" height="0" aria-hidden="true" style="position:absolute">
+  <defs>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="M15.6 15.6 21 21" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M3 12h18M12 3c2.6 2.6 2.6 15.4 0 18M12 3c-2.6 2.6-2.6 15.4 0 18" fill="none" stroke="currentColor" stroke-width="2.2"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M12 11v6M12 7.4v.2" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="m4 8 7.1 4.9c.55.38 1.25.38 1.8 0L20 8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="M3 12.5 12 17l9-4.5M3 17 12 21.5 21 17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M15.5 5.5A2.5 2.5 0 0 0 13 3H6.5A2.5 2.5 0 0 0 4 5.5V13a2.5 2.5 0 0 0 2.5 2.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+  </defs>
+</svg>
+
+<header class="bar">
+  <a class="brand" href="/" aria-label="WhoIP 首页">
+    <span class="brand-mark"><svg width="20" height="20"><use href="#i-globe"/></svg></span>
+    <span class="brand-txt">Who<em>IP</em></span>
+  </a>
+  <nav class="bar-nav" aria-label="站点导航">
+    <a href="/">IP</a>
+    <a href="/whois" aria-current="page">WHOIS</a>
+    <a href="/contact">联系</a>
+  </nav>
+  <a class="bar-me" href="/#myip"><span class="dot dot-lime"></span><span>我的 IP</span></a>
+</header>
+
+<main class="wrap">
+  <section class="cell cell-whero" id="hero">
+    <p class="eyebrow"><span class="sq sq-violet"></span>WhoIP · WHOIS · RDAP</p>
+    <h1 class="h1">查一个域名的<br><mark class="hl hl-pink">注册局</mark>、<mark class="hl hl-sky">日期</mark>、<mark class="hl hl-lime">名字服务器</mark>。</h1>
+    <p class="tagline"><span class="tl-key">WHOIS</span><span class="tl-sep">·</span><em>RDAP 优先，没有再退回端口 43。</em></p>
+    <p class="lede">输入域名或带协议的网址。页面请求本站 <span class="mono">/api/whois/域名</span>，由边缘函数转发到 who-dat。注册人如果被脱敏，页面会照实写「未公开」，而不是编一个联系人。</p>
+    <form class="search" id="qForm" autocomplete="off">
+      <span class="search-ico"><svg width="22" height="22"><use href="#i-search"/></svg></span>
+      <input id="qInput" name="q" type="text" inputmode="url" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" readonly aria-label="要查询的域名" placeholder="例如 example.com 或 https://example.com">
+      <button type="submit" class="btn btn-primary" id="goBtn">查询</button>
+    </form>
+    <p class="qerr" id="qErr" role="alert" hidden></p>
+    <div class="chips" id="chips">
+      <span class="chips-label">试试：</span>
+      <button class="chip" type="button" data-q="example.com">example.com</button>
+      <button class="chip" type="button" data-q="wikipedia.org">wikipedia.org</button>
+      <button class="chip" type="button" data-q="github.com">github.com</button>
+      <button class="chip" type="button" data-q="nic.google">nic.google</button>
+    </div>
+    <p class="status" id="status" aria-live="polite"><span class="dot dot-grey"></span>等待输入。查询走本站 API，不在浏览器里直连注册局。</p>
+  </section>
+
+  <section class="cell cell-accent cell-wside">
+    <p class="eyebrow"><span class="sq sq-lime"></span>同一套数据</p>
+    <h2 class="h1">先问 RDAP，没有再退回 WHOIS。</h2>
+    <p class="lede">who-dat 按 TLD 找注册局，把 RDAP 和传统 WHOIS 收成同一份 JSON。Cloudflare Pages 跑不了这个 Go 服务，所以它单独部署，前端只认环境变量 <span class="mono">WHOIS_API_BASE</span>。</p>
+    <p class="fine">有疑问不要在这里找第二张表单。IP 和 WHOIS 都链到 <a class="foot-link" href="/contact">联系</a>。</p>
+  </section>
+
+  <section class="cell cell-wresult" id="result">
+    <div class="cell-head">
+      <h2 class="h2"><svg width="18" height="18"><use href="#i-info"/></svg><span id="dTitle">查询结果</span></h2>
+      <div class="cell-tools">
+        <button class="mini" id="copyJson" type="button" hidden><svg width="14" height="14"><use href="#i-copy"/></svg>复制 JSON</button>
+      </div>
+    </div>
+    <div class="empty" id="resultEmpty">
+      <svg viewBox="0 0 120 120" class="empty-art" aria-hidden="true">
+        <circle cx="60" cy="60" r="46" fill="none" stroke="var(--ink)" stroke-width="3" stroke-dasharray="7 9" opacity=".45"/>
+        <circle cx="60" cy="60" r="27" fill="none" stroke="var(--violet)" stroke-width="4"/>
+        <circle cx="60" cy="60" r="7" fill="var(--pink)" stroke="var(--ink)" stroke-width="3"/>
+      </svg>
+      <p>还没有域名。<br>输入 example.com，或点上面的示例。</p>
+    </div>
+    <div id="resultBody" hidden>
+      <div class="res-top">
+        <div class="res-id">
+          <p class="res-ip mono" id="rDomain">—</p>
+          <p class="res-country" id="rUnicode" hidden></p>
+          <p class="res-path" id="rId">—</p>
+        </div>
+        <span class="res-type" id="rReg">—</span>
+      </div>
+      <dl class="kv" id="rKv"></dl>
+      <p class="fine" id="rNote"></p>
+    </div>
+  </section>
+
+  <section class="cell cell-wpeople" id="people">
+    <div class="cell-head">
+      <h2 class="h2"><svg width="18" height="18"><use href="#i-mail"/></svg>联系人</h2>
+      <span class="badge badge-grey" id="peopleBadge">待查询</span>
+    </div>
+    <p class="lede lede-sm">注册人、管理、技术和账单四个角色。多数 gTLD 在 RDAP 里会把个人信息涂掉，这是注册局的决定，不是本站删的。</p>
+    <div class="people" id="peopleBody"><p class="dnsrec-empty">查询后显示。</p></div>
+  </section>
+
+  <section class="cell cell-wns" id="ns">
+    <div class="cell-head">
+      <h2 class="h2"><svg width="18" height="18"><use href="#i-layers"/></svg>状态、名字服务器、DNSSEC</h2>
+    </div>
+    <div class="pills" id="statusPills"><span class="pill">待查询</span></div>
+    <div class="ns-list" id="nsList"></div>
+    <p class="fine" id="dnssecLine">DNSSEC 在查询后显示。</p>
+  </section>
+
+  <section class="cell cell-wmeta" id="meta">
+    <div class="cell-head"><h2 class="h2"><svg width="18" height="18"><use href="#i-info"/></svg>这次查询</h2></div>
+    <dl class="kv" id="metaKv">
+      <div class="kv-row"><dt>来源</dt><dd>还没有</dd></div>
+    </dl>
+    <p class="fine">数据来自 who-dat（MIT，Alicia Sykes）。想看这个域名解析到哪、线路什么样，用 IP 页。</p>
+    <a class="btn btn-ghost btn-sm" id="ipLink" href="/">到 IP 页查这个域名</a>
+  </section>
+
+  <section class="cell cell-faq" id="faq">
+    <div class="cell-head"><h2 class="h2"><svg width="18" height="18"><use href="#i-info"/></svg>常见问题</h2></div>
+    <details class="qa"><summary>和 IP 页有什么区别？</summary><p>IP 页回答「这个地址在哪、是谁的网络」。WHOIS 页回答「这个域名登记在哪、什么时候到期、名字服务器是谁」。同一个域名可以两边都查：这里看注册信息，<a href="/">IP 页</a>看解析和地理。</p></details>
+    <details class="qa"><summary>为什么联系人经常是空的？</summary><p>2018 年之后，很多注册局按 GDPR 在 RDAP / WHOIS 里脱敏。本站把 <span class="mono">redacted: true</span> 显示成「未公开」。滥用投诉要看注册商公开的 abuse 邮箱；没有这项时，注册局就没有给。</p></details>
+    <details class="qa"><summary>查询失败时先看什么？</summary><p>本地和 Pages 都要有 <span class="mono">WHOIS_API_BASE</span>，指向已经跑起来的 who-dat。<span class="mono">/health</span> 应返回 <span class="mono">{"status":"ok"}</span>。域名本身要能解析成可注册的名字，<span class="mono">not-a-domain</span> 会被拒绝。</p></details>
+    <details class="qa"><summary>联系谁？</summary><p>全站只有 <a href="/contact">联系</a> 这一页。who-dat 自带的联系表单不是 WhoIP 的入口，部署 API 时不必对访客开放。</p></details>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="foot-l">
+    <span class="brand-mark brand-mark-sm"><svg width="16" height="16"><use href="#i-globe"/></svg></span>
+    <span class="mono">WhoIP</span>
+    <span class="foot-sep">/</span>
+    <span class="foot-slogan">IP 查询与 WHOIS，同一个站。</span>
+  </div>
+  <nav class="foot-r" aria-label="站点导航">
+    <a class="foot-link" href="/">IP</a>
+    <span class="foot-sep">/</span>
+    <a class="foot-link" href="/whois" aria-current="page">WHOIS</a>
+    <span class="foot-sep">/</span>
+    <a class="foot-link" href="/contact">联系</a>
+  </nav>
+</footer>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="/assets/whois.js"></script>
+</body>
+</html>

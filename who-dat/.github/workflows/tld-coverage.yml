@@ -1,0 +1,70 @@
+name: 🌍 TLD Coverage Report
+
+on:
+  schedule:
+    - cron: '0 1 * * 6' # Saturdays 01:00 UTC
+  workflow_dispatch:
+    inputs:
+      workers:
+        description: Concurrent lookups
+        type: string
+        default: '6'
+      timeout:
+        description: Per-domain timeout
+        type: string
+        default: 20s
+      cooldown:
+        description: Wait before the recovery pass
+        type: string
+        default: 20s
+      limit:
+        description: Max TLDs to probe (0 = all)
+        type: string
+        default: '0'
+      recover:
+        description: Re-probe transient failures once
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tld-coverage
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Probe RDAP/WHOIS coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - name: 🛎️ Checkout
+        uses: actions/checkout@v7
+
+      - name: 🐹 Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: 🌍 Run TLD coverage check
+        run: |
+          go run ./cmd/tldcheck \
+            -workers "${{ inputs.workers || '6' }}" \
+            -timeout "${{ inputs.timeout || '20s' }}" \
+            -cooldown "${{ inputs.cooldown || '20s' }}" \
+            -limit "${{ inputs.limit || '0' }}" \
+            -recover="${{ inputs.recover || 'false' }}" \
+            -md tld-coverage.md \
+            -json tld-coverage.json
+
+      - name: 📝 Publish report to job summary
+        if: always()
+        run: '[ -f tld-coverage.md ] && cat tld-coverage.md >> "$GITHUB_STEP_SUMMARY" || echo "no report generated" >> "$GITHUB_STEP_SUMMARY"'
+
+      - name: 📤 Upload JSON artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tld-coverage-json
+          path: tld-coverage.json

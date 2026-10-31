@@ -1,0 +1,11 @@
+# wi.fs.kg is a public WHOIS lookup site.
+# Crawl the pages. Skip the lookup API so a crawler is not a registry client.
+User-agent: *
+Allow: /
+Disallow: /v1/
+Disallow: /api/
+Disallow: /multi
+Disallow: /health
+Disallow: /ping
+
+Sitemap: https://wi.fs.kg/sitemap.xml
