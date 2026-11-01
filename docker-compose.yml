@@ -1,0 +1,10 @@
+services:
+  who-dat:
+    build:
+      context: ./who-dat
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      ENABLE_CACHE: "true"
+    restart: unless-stopped

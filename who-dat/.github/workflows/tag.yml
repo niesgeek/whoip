@@ -1,0 +1,186 @@
+# Creates a new git tag when a PR is merged, or on manual dispatch.
+#
+# PR trigger flow:
+# - Runs when a PR into main is merged, if it changed code (Go, Docker, deps)
+# - Auto-increments the patch version from the latest tag, then creates + pushes it
+#
+# Manual dispatch flow:
+# - With a version input, tags exactly that version (use for minor/major bumps)
+# - Without a version, auto-increments the patch version
+#
+# The pushed tag then drives the other workflows: docker.yml (every tag) and
+# release.yml (minor/major X.Y.0 tags). For those to trigger, the tag must be
+# pushed with a PAT (BOT_TOKEN), since tags pushed with GITHUB_TOKEN do not
+# start new workflow runs.
+
+name: 🔖 Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to tag (e.g. v1.3.0). Leave blank to auto-increment patch.'
+        required: false
+        type: string
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [closed]
+    branches: [main]
+
+concurrency:
+  group: auto-version-and-tag
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+env:
+  IS_MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+
+jobs:
+  version-and-tag:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 🔢 Validate manual dispatch
+        if: env.IS_MANUAL == 'true'
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$DISPATCH_REF" != "refs/heads/main" ]; then
+            echo "::error::Manual dispatch only allowed from main (got: $DISPATCH_REF)"
+            exit 1
+          fi
+          if [ -n "$INPUT_VERSION" ] && ! printf '%s' "$INPUT_VERSION" | grep -qE '^v?[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid version '${INPUT_VERSION}'. Must be semver (e.g. v1.3.0)."
+            exit 1
+          fi
+
+      - name: 📂 Check PR for code changes
+        id: check_pr
+        if: env.IS_MANUAL != 'true'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pull_number = context.payload.pull_request.number;
+            const files = await github.paginate(
+              github.rest.pulls.listFiles, { owner, repo, pull_number }
+            );
+            const codePatterns = [
+              /\.go$/, /^cmd\//, /^internal\//, /^web\//,
+              /^Dockerfile$/, /^go\.(mod|sum)$/,
+            ];
+            const codeChanged = files.some(f =>
+              codePatterns.some(p => p.test(f.filename))
+            );
+            core.info(`Files changed: ${files.length}, code changed: ${codeChanged}`);
+            if (!codeChanged) core.info('No code changes, skipping tag');
+            core.setOutput('needs_tag', codeChanged.toString());
+
+      - name: 🛎️ Checkout repository
+        if: env.IS_MANUAL == 'true' || steps.check_pr.outputs.needs_tag == 'true'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: 👤 Configure git identity
+        if: env.IS_MANUAL == 'true' || steps.check_pr.outputs.needs_tag == 'true'
+        run: |
+          git config user.name "Liss-Bot"
+          git config user.email "liss-bot@d0h.co"
+
+      - name: 🏷️ Compute, create and push tag
+        id: tag
+        if: env.IS_MANUAL == 'true' || steps.check_pr.outputs.needs_tag == 'true'
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          PR_TITLE: ${{ github.event.pull_request.title || '' }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login || github.actor }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+
+          if [ "$IS_MANUAL" = "true" ] && [ -n "$INPUT_VERSION" ]; then
+            VERSION="v${INPUT_VERSION#v}"
+          else
+            # Latest semver tag (accepts 2-part v1.0 and 3-part v1.0.0), default v0.0.0
+            LATEST=$(git tag | grep -E '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' | sort -V | tail -n1)
+            LATEST="${LATEST:-v0.0.0}"
+            CORE="${LATEST#v}"
+            MAJOR="${CORE%%.*}"
+            REST="${CORE#*.}"
+            MINOR="${REST%%.*}"
+            PATCH="${REST#*.}"
+            # 2-part tag (e.g. v1.0) has no patch segment -> REST is just the minor
+            [ "$PATCH" = "$REST" ] && PATCH=0
+            VERSION="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+            echo "Latest tag $LATEST -> next $VERSION"
+          fi
+
+          echo "Next version: $VERSION"
+
+          if git rev-parse "refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists, skipping"
+            echo "result=existed" >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            printf 'Who-Dat %s 🚀\n\n' "$VERSION"
+            if [ -n "$PR_NUMBER" ]; then
+              printf 'PR: #%s - %s\n' "$PR_NUMBER" "$PR_TITLE"
+            else
+              printf 'Manual release by @%s\n' "$PR_AUTHOR"
+            fi
+            printf 'Author: @%s\n' "$PR_AUTHOR"
+            printf 'Commit: %s\n' "$MERGE_SHA"
+          } > tag-message.txt
+
+          git tag -a "$VERSION" -F tag-message.txt
+          git push origin "$VERSION"
+          echo "result=created" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: 📋 Job summary
+        if: always()
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          PR_TITLE: ${{ github.event.pull_request.title || '' }}
+          NEEDS_TAG: ${{ steps.check_pr.outputs.needs_tag }}
+          TAG_OUTCOME: ${{ steps.tag.outcome }}
+          TAG_RESULT: ${{ steps.tag.outputs.result }}
+          TAG_VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## 🔖 Tag"
+            echo ""
+            echo "| Step | Result |"
+            echo "|------|--------|"
+            if [ "$IS_MANUAL" = "true" ]; then
+              echo "| Trigger | Manual dispatch |"
+            elif [ -n "$PR_NUMBER" ]; then
+              echo "| PR | [#${PR_NUMBER}](${REPO_URL}/pull/${PR_NUMBER}) ${PR_TITLE} |"
+            fi
+            if [ "$TAG_RESULT" = "created" ]; then
+              echo "| Tag | ✅ [\`${TAG_VERSION}\`](${REPO_URL}/releases/tag/${TAG_VERSION}) |"
+            elif [ "$TAG_RESULT" = "existed" ]; then
+              echo "| Tag | ⏭️ Already exists: \`${TAG_VERSION}\` |"
+            elif [ "$TAG_OUTCOME" = "failure" ]; then
+              echo "| Tag | ❌ Failed |"
+            else
+              echo "| Tag | ⏭️ Skipped (no code changes) |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

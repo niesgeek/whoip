@@ -1,0 +1,12 @@
+Vendored into WhoIP from https://github.com/niesgeek/who-dat
+commit 74424bcdf94a6bbc6f20c13507ccfe5b7b24258e
+
+Upstream project: https://github.com/lissy93/who-dat
+License: MIT
+Copyright (c) 2022 Alicia Sykes <https://aliciasykes.com>
+
+The MIT license text is in LICENSE and must stay with this copy.
+
+This directory is the WHOIS/RDAP API. WhoIP's only visitor-facing contact
+page is the frontend route /contact. The /contact page embedded in this
+service is upstream's own form and is not a second WhoIP contact channel.

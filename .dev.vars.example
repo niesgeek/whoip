@@ -1,0 +1,9 @@
+# 复制为 .dev.vars 后再改。这个文件可以被提交，.dev.vars 不会。
+# who-dat 的根地址，不要带末尾路径。本地预览：npm run preview
+WHOIS_API_BASE=http://127.0.0.1:8080
+# 只有 who-dat 设置了 AUTH_KEY 时才填
+WHOIS_API_KEY=
+# 联系页。不填邮箱时页面显示 hello@example.com
+CONTACT_EMAIL=hello@example.com
+CONTACT_URL=
+CONTACT_URL_LABEL=相关链接

@@ -1,0 +1,182 @@
+# Cross-compiles Who-Dat for every supported platform and drafts a GitHub
+# release with the binaries, a combined SHA256 checksum file, and an SLSA
+# build-provenance attestation, plus auto-generated release notes.
+#
+# Triggered by:
+# - Push of any minor/major (vX.Y.0) git tag, since patch tags only get Docker images
+# - Manual dispatch with any existing tag (any version)
+#
+# The release is left as a DRAFT for review before publishing.
+
+name: 🚀 Release
+
+on:
+  push:
+    tags: ['v*.*.0']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing git tag to release (e.g. v1.3.0)'
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 🏗️ Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        goos: [linux, windows, darwin]
+        goarch: ['386', amd64, arm64]
+        exclude:
+          - { goos: darwin, goarch: '386' }
+          - { goos: windows, goarch: arm64 }
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: 🛎️ Checkout tag
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+
+      - name: 🐹 Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: ⚒️ Build and package
+        id: pkg
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          BIN=who-dat
+          [ "$GOOS" = windows ] && BIN=who-dat.exe
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-w -s -X main.version=${TAG}" \
+            -o "$BIN" ./cmd/server
+
+          NAME="who-dat-${TAG}-${GOOS}-${GOARCH}"
+          if [ "$GOOS" = windows ]; then
+            ASSET="${NAME}.zip"
+            zip -q "$ASSET" "$BIN" LICENSE
+          else
+            ASSET="${NAME}.tar.gz"
+            tar -czf "$ASSET" "$BIN" LICENSE
+          fi
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+
+      - name: 📤 Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: who-dat-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ steps.pkg.outputs.asset }}
+          retention-days: 1
+          if-no-files-found: error
+
+  release:
+    name: 🚀 Draft release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: 🛎️ Checkout tag
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          fetch-depth: 0
+
+      - name: 📥 Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: 📦 Collect assets and checksums
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) \
+            -exec mv {} dist/ \;
+          ( cd dist && sha256sum ./* > checksums.txt )
+          echo "Release assets:"
+          ls -lh dist
+
+      - name: 🪪 Generate build provenance attestation
+        id: attest
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+
+      - name: 🔎 Find previous release tag
+        id: prev
+        env:
+          CURRENT_TAG: ${{ env.TAG }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          PREV=$({ echo "$CURRENT_TAG"; git tag | grep -E '^v[0-9]+\.[0-9]+\.0$' || true; } \
+            | sort -uV \
+            | awk -v cur="$CURRENT_TAG" '$0 == cur { print prev; exit } { prev = $0 }')
+          echo "tag=$PREV" >> "$GITHUB_OUTPUT"
+          echo "Previous release tag: ${PREV:-none}"
+
+      - name: 📝 Create draft release
+        id: release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Who-Dat ${{ env.TAG }}
+          draft: true
+          prerelease: false
+          generate_release_notes: true
+          previous_tag: ${{ steps.prev.outputs.tag }}
+          fail_on_unmatched_files: true
+          files: dist/*
+          token: ${{ secrets.RELEASE_TOKEN || secrets.BOT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: 📋 Job summary
+        if: always()
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          PREV_TAG: ${{ steps.prev.outputs.tag }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+          ATTEST_URL: ${{ steps.attest.outputs.attestation-url }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## 🚀 Release Draft"
+            echo ""
+            echo "| Item | Value |"
+            echo "|------|-------|"
+            echo "| Tag | [\`${TAG}\`](${REPO_URL}/releases/tag/${TAG}) |"
+            if [ -n "$PREV_TAG" ]; then
+              echo "| Notes since | [\`${PREV_TAG}\`](${REPO_URL}/releases/tag/${PREV_TAG}) |"
+            fi
+            if [ -n "$ATTEST_URL" ]; then
+              echo "| Attestation | ✅ [View](${ATTEST_URL}) |"
+            else
+              echo "| Attestation | ❌ Failed |"
+            fi
+            if [ -n "$RELEASE_URL" ]; then
+              echo "| Draft release | ✅ [Review and publish](${RELEASE_URL}) |"
+            else
+              echo "| Draft release | ❌ Failed |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
